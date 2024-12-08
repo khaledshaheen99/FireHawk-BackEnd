@@ -12,6 +12,12 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(bodyParser.json());
 
+// Middleware to ensure responses are JSON
+app.use((req, res, next) => {
+  res.setHeader('Content-Type', 'application/json');
+  next();
+});
+
 // Firestore setup
 const firestore = new Firestore({
   keyFilename: './service-account-key.json',
@@ -23,10 +29,11 @@ const carsCollection = firestore.collection('cars');
 app.get('/cars', async (req, res) => {
   try {
     const snapshot = await carsCollection.get();
-    const cars = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const cars = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
     res.status(200).json(cars);
   } catch (error) {
-    res.status(500).send('Error fetching cars: ' + error.message);
+    console.error('Error fetching cars:', error.message);
+    res.status(500).json({ error: 'Error fetching cars: ' + error.message });
   }
 });
 
@@ -34,10 +41,31 @@ app.get('/cars', async (req, res) => {
 app.post('/cars', async (req, res) => {
   try {
     const car = req.body;
-    await carsCollection.add(car);
-    res.status(201).send('Car added successfully');
+
+    // Validate required fields
+    const requiredFields = [
+      'name',
+      'mpg',
+      'cylinders',
+      'displacement',
+      'horsepower',
+      'weight',
+      'acceleration',
+      'model_year',
+      'origin',
+    ];
+    for (const field of requiredFields) {
+      if (!car[field]) {
+        return res.status(400).json({ error: `Missing required field: ${field}` });
+      }
+    }
+
+    // Add car to Firestore
+    const docRef = await carsCollection.add(car);
+    res.status(201).json({ message: 'Car added successfully', id: docRef.id });
   } catch (error) {
-    res.status(500).send('Error adding car: ' + error.message);
+    console.error('Error adding car:', error.message);
+    res.status(500).json({ error: 'Error adding car: ' + error.message });
   }
 });
 
@@ -45,7 +73,7 @@ app.post('/cars', async (req, res) => {
 app.get('/export', async (req, res) => {
   try {
     const snapshot = await carsCollection.get();
-    const cars = snapshot.docs.map(doc => doc.data());
+    const cars = snapshot.docs.map((doc) => doc.data());
     const parser = new Parser();
     const csv = parser.parse(cars);
 
@@ -55,8 +83,18 @@ app.get('/export', async (req, res) => {
     res.setHeader('Content-Disposition', 'attachment; filename=cars.csv');
     res.status(200).send(csv);
   } catch (error) {
-    res.status(500).send('Error exporting cars: ' + error.message);
+    console.error('Error exporting cars:', error.message);
+    res.status(500).json({ error: 'Error exporting cars: ' + error.message });
   }
+});
+
+app.get('/', (req, res) => {
+  res.status(200).json({ message: 'Welcome to the Car Management API!' });
+});
+
+app.use((err, req, res, next) => {
+  console.error('Unhandled Error:', err.message);
+  res.status(500).json({ error: 'Internal Server Error' });
 });
 
 app.listen(port, () => {
